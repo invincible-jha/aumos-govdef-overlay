@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+  govdef-overlay:
+    build:
+      context: .
+      target: runtime
+    ports:
+      - "8000:8000"
+    environment:
+      - AUMOS_GOVDEF_DATABASE_URL=postgresql+asyncpg://aumos:aumos@postgres:5432/aumos_govdef
+      - AUMOS_GOVDEF_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - AUMOS_GOVDEF_FEDRAMP_IMPACT_LEVEL=moderate
+      - AUMOS_GOVDEF_NIST_BASELINE=moderate
+      - AUMOS_GOVDEF_CMMC_TARGET_LEVEL=3
+      - AUMOS_GOVDEF_MAX_IL_LEVEL=4
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - aumos-dev
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: aumos
+      POSTGRES_PASSWORD: aumos
+      POSTGRES_DB: aumos_govdef
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aumos -d aumos_govdef"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aumos-dev
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - aumos-dev
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks:
+      - aumos-dev
+
+networks:
+  aumos-dev:
+    driver: bridge

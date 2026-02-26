@@ -1,0 +1,42 @@
+# Git
+.git/
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Docs
+*.md
+docs/
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+
+# CI
+.github/
