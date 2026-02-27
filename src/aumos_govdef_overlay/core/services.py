@@ -15,7 +15,16 @@ from aumos_common.auth import TenantContext
 from aumos_common.errors import NotFoundError
 from aumos_common.observability import get_logger
 
+from aumos_govdef_overlay.adapters.audit_logger import GovAuditLogger
+from aumos_govdef_overlay.adapters.cmmc_checker import CMMCChecker
+from aumos_govdef_overlay.adapters.cui_handler import CUIHandler
+from aumos_govdef_overlay.adapters.data_residency_checker import DataResidencyChecker
+from aumos_govdef_overlay.adapters.fedramp_toolkit import FedRAMPToolkit
+from aumos_govdef_overlay.adapters.fips_enforcer import FIPSEnforcer
+from aumos_govdef_overlay.adapters.incident_reporter import GovIncidentReporter
 from aumos_govdef_overlay.adapters.kafka import GovDefEventPublisher
+from aumos_govdef_overlay.adapters.nist_800_53_mapper import NIST80053Mapper
+from aumos_govdef_overlay.adapters.sovereign_cloud_config import SovereignCloudConfig
 from aumos_govdef_overlay.core.interfaces import (
     ICMMCRepository,
     IClassifiedEnvRepository,
@@ -753,10 +762,279 @@ class ClassifiedEnvService:
         return await self._repository.list_all(tenant)
 
 
+class GovDefComplianceToolsService:
+    """Service providing access to all government compliance domain tools.
+
+    Aggregates FedRAMP toolkit, NIST 800-53 mapper, CMMC checker, CUI handler,
+    FIPS enforcer, data residency checker, incident reporter, audit logger,
+    and sovereign cloud config tools into a single service for API layer access.
+
+    All underlying adapters are stateless computation tools that perform
+    domain logic without database access. This service wires them together
+    and provides structured logging for all operations.
+
+    Args:
+        publisher: Domain event publisher for compliance tool invocation events.
+    """
+
+    def __init__(
+        self,
+        publisher: GovDefEventPublisher,
+    ) -> None:
+        """Initialize compliance tools service with all domain adapters.
+
+        Args:
+            publisher: Event publisher for govdef compliance tool events.
+        """
+        self._publisher = publisher
+        self.fedramp_toolkit = FedRAMPToolkit()
+        self.nist_mapper = NIST80053Mapper()
+        self.cmmc_checker = CMMCChecker()
+        self.cui_handler = CUIHandler()
+        self.fips_enforcer = FIPSEnforcer()
+        self.data_residency_checker = DataResidencyChecker()
+        self.incident_reporter = GovIncidentReporter()
+        self.audit_logger = GovAuditLogger()
+        self.sovereign_cloud_config = SovereignCloudConfig()
+
+    def get_fedramp_baseline(
+        self,
+        impact_level: str,
+        tenant: TenantContext,
+    ) -> dict:
+        """Map FedRAMP baseline controls for the specified impact level.
+
+        Args:
+            impact_level: FedRAMP impact level (low, moderate, high).
+            tenant: Tenant context for audit logging.
+
+        Returns:
+            Dictionary with baseline control families, counts, and control IDs.
+        """
+        result = self.fedramp_toolkit.map_baseline_controls(impact_level)
+        logger.info(
+            "FedRAMP baseline mapped",
+            tenant_id=str(tenant.tenant_id),
+            impact_level=impact_level,
+        )
+        return result
+
+    def perform_nist_gap_analysis(
+        self,
+        implemented_controls: list[str],
+        target_baseline: str,
+        tenant: TenantContext,
+    ) -> dict:
+        """Perform a NIST 800-53 Rev 5 gap analysis.
+
+        Compares implemented controls against the target baseline to identify
+        gaps, missing control families, and remediation priorities.
+
+        Args:
+            implemented_controls: List of implemented NIST control IDs.
+            target_baseline: Target baseline (low, moderate, high).
+            tenant: Tenant context for audit logging.
+
+        Returns:
+            Dictionary with gap analysis results, missing controls, and
+            completion percentage.
+        """
+        result = self.nist_mapper.perform_gap_analysis(
+            implemented_controls=implemented_controls,
+            target_baseline=target_baseline,
+        )
+        logger.info(
+            "NIST gap analysis performed",
+            tenant_id=str(tenant.tenant_id),
+            target_baseline=target_baseline,
+            implemented_count=len(implemented_controls),
+            gap_count=result.get("gap_count", 0),
+        )
+        return result
+
+    def compute_cmmc_sprs_score(
+        self,
+        domain_assessments: list[dict],
+        target_level: int,
+        tenant: TenantContext,
+    ) -> dict:
+        """Compute SPRS score from CMMC domain assessments.
+
+        Args:
+            domain_assessments: List of domain assessment dicts from CMMCChecker.
+            target_level: CMMC target level (1, 2, or 3).
+            tenant: Tenant context for audit logging.
+
+        Returns:
+            Dictionary with SPRS score, scorecard, and DFARS compliance status.
+        """
+        result = self.cmmc_checker.compute_sprs_score(
+            domain_assessments=domain_assessments,
+            target_level=target_level,
+        )
+        logger.info(
+            "CMMC SPRS score computed",
+            tenant_id=str(tenant.tenant_id),
+            target_level=target_level,
+            sprs_score=result.get("sprs_score"),
+        )
+        return result
+
+    def verify_data_residency(
+        self,
+        cloud_provider: str,
+        region: str,
+        data_category: str,
+        impact_level: str,
+        tenant: TenantContext,
+    ) -> dict:
+        """Verify data location against US sovereignty requirements.
+
+        Args:
+            cloud_provider: Cloud provider identifier.
+            region: Cloud region identifier.
+            data_category: Data classification category.
+            impact_level: FedRAMP/DoD impact level.
+            tenant: Tenant context for audit logging.
+
+        Returns:
+            Dictionary with compliance status, violations, and recommended regions.
+        """
+        result = self.data_residency_checker.verify_data_location(
+            cloud_provider=cloud_provider,
+            region=region,
+            data_category=data_category,
+            impact_level=impact_level,
+        )
+        logger.info(
+            "Data residency verification completed",
+            tenant_id=str(tenant.tenant_id),
+            cloud_provider=cloud_provider,
+            region=region,
+            compliant=result.get("compliant"),
+        )
+        return result
+
+    def classify_security_incident(
+        self,
+        incident_data: dict,
+        tenant: TenantContext,
+    ) -> dict:
+        """Classify a security incident per FISMA and DISA STIG taxonomies.
+
+        Args:
+            incident_data: Incident details dictionary.
+            tenant: Tenant context for audit logging.
+
+        Returns:
+            Dictionary with FISMA category, STIG severity, and reporting obligations.
+        """
+        result = self.incident_reporter.classify_incident(incident_data)
+        logger.info(
+            "Security incident classified",
+            tenant_id=str(tenant.tenant_id),
+            fisma_category=result.get("fisma_category"),
+            stig_category=result.get("stig_category"),
+            us_cert_required=result.get("us_cert_report_required"),
+        )
+        return result
+
+    def generate_audit_event(
+        self,
+        event_type: str,
+        subject_id: str,
+        object_id: str,
+        outcome: str,
+        source_ip: str,
+        component_id: str,
+        session_id: str,
+        tenant: TenantContext,
+        additional_fields: dict | None = None,
+    ) -> dict:
+        """Generate a NIST 800-92 compliant audit log event.
+
+        Args:
+            event_type: Auditable event type key.
+            subject_id: Subject identifier (hashed before storage).
+            object_id: Object or resource identifier.
+            outcome: Event outcome (success/failure/unknown).
+            source_ip: Source IP address (masked before storage).
+            component_id: System component generating the event.
+            session_id: Session correlation identifier.
+            tenant: Tenant context for audit logging.
+            additional_fields: Optional supplemental event context.
+
+        Returns:
+            Dictionary with complete AU-3 compliant audit record and chain hash.
+        """
+        result = self.audit_logger.generate_audit_event(
+            event_type=event_type,
+            subject_id=subject_id,
+            object_id=object_id,
+            outcome=outcome,
+            source_ip=source_ip,
+            component_id=component_id,
+            session_id=session_id,
+            additional_fields=additional_fields,
+        )
+        if result.get("severity") in ("critical", "alert", "emergency"):
+            logger.warning(
+                "High-severity audit event generated via service",
+                tenant_id=str(tenant.tenant_id),
+                event_type=event_type,
+                severity=result.get("severity"),
+                component_id=component_id,
+            )
+        return result
+
+    def get_sovereign_deployment_blueprint(
+        self,
+        deployment_name: str,
+        provider: str,
+        region: str,
+        impact_level: str,
+        services_required: list[str],
+        compliance_frameworks: list[str],
+        tenant: TenantContext,
+    ) -> dict:
+        """Generate a sovereign cloud deployment blueprint.
+
+        Args:
+            deployment_name: Human-readable deployment identifier.
+            provider: Cloud provider identifier.
+            region: Target region.
+            impact_level: FedRAMP/DoD impact level.
+            services_required: List of required cloud services.
+            compliance_frameworks: List of compliance frameworks.
+            tenant: Tenant context for audit logging.
+
+        Returns:
+            Dictionary with complete deployment blueprint and compliance checklist.
+        """
+        result = self.sovereign_cloud_config.generate_deployment_blueprint(
+            deployment_name=deployment_name,
+            provider=provider,
+            region=region,
+            impact_level=impact_level,
+            services_required=services_required,
+            compliance_frameworks=compliance_frameworks,
+        )
+        logger.info(
+            "Sovereign deployment blueprint generated",
+            tenant_id=str(tenant.tenant_id),
+            deployment_name=deployment_name,
+            provider=provider,
+            impact_level=impact_level,
+            deployment_ready=result.get("deployment_ready"),
+        )
+        return result
+
+
 __all__ = [
     "FedRAMPService",
     "NISTService",
     "CMMCService",
     "SovereignCloudService",
     "ClassifiedEnvService",
+    "GovDefComplianceToolsService",
 ]
