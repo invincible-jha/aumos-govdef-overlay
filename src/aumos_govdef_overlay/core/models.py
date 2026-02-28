@@ -257,6 +257,151 @@ class ClassifiedEnvironment(AumOSModel):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class SSPDocument(AumOSModel):
+    """System Security Plan document record.
+
+    Stores generated FedRAMP SSP in OSCAL JSON format.
+    Tenant-scoped because each deployment may serve a different agency.
+
+    Table: gdf_ssp_documents
+    """
+
+    __tablename__ = "gdf_ssp_documents"
+
+    system_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    impact_level: Mapped[str] = mapped_column(String(10), nullable=False)
+    oscal_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0")
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="draft",
+        comment="draft | in_review | approved | submitted"
+    )
+    ato_submission_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    ato_authorization_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    authorizing_agency: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+
+class ConMonReport(AumOSModel):
+    """FedRAMP Continuous Monitoring report per NIST SP 800-137.
+
+    One report per monitoring cycle (default daily at 2am UTC).
+    Controls compliance rate tracked over time for trend analysis.
+
+    Table: gdf_conmon_reports
+    """
+
+    __tablename__ = "gdf_conmon_reports"
+
+    cycle_date: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    impact_level: Mapped[str] = mapped_column(String(10), nullable=False)
+    controls_checked: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    controls_compliant: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    compliance_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    degraded_controls: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
+    report_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class POAMItem(AumOSModel):
+    """Plan of Action and Milestones remediation item.
+
+    FedRAMP remediation timelines: Critical=30d, High=90d, Moderate=180d, Low=365d.
+    Status lifecycle: OPEN -> IN_REMEDIATION -> CLOSED (no skipping).
+
+    Table: gdf_poam_items
+    """
+
+    __tablename__ = "gdf_poam_items"
+
+    finding_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    control_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    risk_level: Mapped[str] = mapped_column(
+        String(20), nullable=False,
+        comment="critical | high | moderate | low"
+    )
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    remediation_steps: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    due_date: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="OPEN",
+        comment="OPEN | IN_REMEDIATION | CLOSED"
+    )
+    closed_at: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    closure_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class STIGScanResult(AumOSModel):
+    """DISA STIG compliance scan result record.
+
+    Stores scan outcomes from bundled STIG profiles (Ubuntu, Docker, Kubernetes).
+    CAT I findings must be remediated before ATO.
+
+    Table: gdf_stig_results
+    """
+
+    __tablename__ = "gdf_stig_results"
+
+    stig_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    target_system: Mapped[str] = mapped_column(String(255), nullable=False)
+    cat1_open: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cat2_open: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cat3_open: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_rules: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    compliance_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    findings: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    scan_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+
+class StateComplianceRecord(AumOSModel):
+    """StateRAMP / TX-RAMP compliance assessment record.
+
+    Table: gdf_state_compliance
+    """
+
+    __tablename__ = "gdf_state_compliance"
+
+    framework: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    authorization_level: Mapped[str] = mapped_column(String(50), nullable=False)
+    controls_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    controls_met: Mapped[int] = mapped_column(Integer, nullable=False)
+    compliance_score: Mapped[float] = mapped_column(Float, nullable=False)
+    authorized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    gaps: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+
+class EMASSSyncPackageRecord(AumOSModel):
+    """eMASS control synchronization package record.
+
+    Table: gdf_emass_packages
+    """
+
+    __tablename__ = "gdf_emass_packages"
+
+    system_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    control_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sync_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    controls: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    synced_at: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
+
+class ITARRecord(AumOSModel):
+    """ITAR compliance record for controlled articles.
+
+    Table: gdf_itar_records
+    """
+
+    __tablename__ = "gdf_itar_records"
+
+    article_description: Mapped[str] = mapped_column(Text, nullable=False)
+    usml_categories: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    is_controlled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    export_license_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="not_required"
+    )
+    license_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    foreign_national_access_restricted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 __all__ = [
     "FedRAMPImpactLevel",
     "FedRAMPAuthorizationStatus",
@@ -271,4 +416,11 @@ __all__ = [
     "CMMCAssessment",
     "SovereignDeployment",
     "ClassifiedEnvironment",
+    "SSPDocument",
+    "ConMonReport",
+    "POAMItem",
+    "STIGScanResult",
+    "StateComplianceRecord",
+    "EMASSSyncPackageRecord",
+    "ITARRecord",
 ]
